@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+PythonAnalytics/data/*.csv
+PythonAnalytics/reports/*
+!PythonAnalytics/reports/.gitkeep
+work/

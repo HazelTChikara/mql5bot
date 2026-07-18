@@ -1,0 +1,26 @@
+analytics:
+  schema_version: 1
+  export_directory: data
+  reports_directory: reports
+  initial_equity: 10000.0
+  rolling_feature_window: 100
+
+validation:
+  fail_on_warnings: false
+
+walk_forward:
+  train_size: 1000
+  test_size: 250
+  step_size: 250
+  expanding_window: true
+
+monte_carlo:
+  simulations: 5000
+  seed: 260717
+
+# Model training is intentionally disabled in schema v1. Do not enable an
+# external filter without chronological, cost-adjusted out-of-sample evidence.
+external_filter:
+  enabled: false
+  expected_model_version: ""
+  maximum_response_age_seconds: 30
