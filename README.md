@@ -4,6 +4,8 @@ This project keeps trading, broker validation, risk limits, and Strategy Tester 
 
 The included `AnalyticsIntegrationExample.mq5` is a deterministic integration example, not a claim of a profitable production strategy. It uses an EMA-trend/closed-bar-breakout rule only to demonstrate the full lifecycle, ATR stops, fixed-percentage sizing, daily loss enforcement, trade export, and tester compatibility. Replace that rule with a separately specified and tested strategy without changing the analytics interfaces.
 
+For the staged path from this example to an operated production platform, see the [Enterprise Implementation Journey](docs/ENTERPRISE_JOURNEY.md).
+
 ## Architecture
 
 ```mermaid
