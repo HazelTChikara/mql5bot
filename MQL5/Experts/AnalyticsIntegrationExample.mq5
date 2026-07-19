@@ -14,6 +14,9 @@ input int                    InpSlowEmaPeriod        = 50;
 input int                    InpAtrPeriod            = 14;
 input double                 InpStopAtrMultiple      = 1.5;
 input double                 InpRewardToRisk         = 2.0;
+input double                 InpMinTrendSeparationAtr = 0.10;
+input double                 InpMinBreakoutAtr       = 0.05;
+input double                 InpMinBodyAtr           = 0.20;
 input double                 InpRiskPercent          = 0.5;
 input double                 InpMaxDailyLossPercent  = 2.0;
 input double                 InpMaxSpreadPoints      = 30.0;
@@ -374,14 +377,36 @@ void InitializeDecision(const MarketSnapshot &snapshot, const MqlRates &closedBa
    decision.externalDecisionApplied          = false;
    decision.appliedRiskMultiplier            = 1.0;
 
-   const bool bullishBreakout = snapshot.trendClassification == "BULLISH" &&
+   const double atrPrice = snapshot.atrPoints * _Point;
+   if(atrPrice <= 0.0)
+   {
+      decision.rejectionReason = "INVALID_ATR";
+      return;
+   }
+   const double trendSeparationAtr = MathAbs(snapshot.fastEma - snapshot.slowEma) / atrPrice;
+   const double bodyAtr = MathAbs(closedBar.close - closedBar.open) / atrPrice;
+   const double bullishDisplacementAtr = (closedBar.close - priorBar.high) / atrPrice;
+   const double bearishDisplacementAtr = (priorBar.low - closedBar.close) / atrPrice;
+   const bool qualityConfirmed = trendSeparationAtr >= InpMinTrendSeparationAtr &&
+                                 bodyAtr >= InpMinBodyAtr;
+   const bool bullishBreakout = qualityConfirmed &&
+                                bullishDisplacementAtr >= InpMinBreakoutAtr &&
+                                snapshot.trendClassification == "BULLISH" &&
                                 closedBar.close > priorBar.high &&
                                 closedBar.close > closedBar.open;
-   const bool bearishBreakout = snapshot.trendClassification == "BEARISH" &&
+   const bool bearishBreakout = qualityConfirmed &&
+                                bearishDisplacementAtr >= InpMinBreakoutAtr &&
+                                snapshot.trendClassification == "BEARISH" &&
                                 closedBar.close < priorBar.low &&
                                 closedBar.close < closedBar.open;
    if(!bullishBreakout && !bearishBreakout)
+   {
+      if(!qualityConfirmed)
+         decision.rejectionReason = "SIGNAL_QUALITY_FILTER";
+      else
+         decision.rejectionReason = "INSUFFICIENT_BREAKOUT_DISPLACEMENT";
       return;
+   }
 
    const bool isLong = bullishBreakout;
    decision.signalAccepted        = true;
@@ -598,7 +623,7 @@ string DealExitReason(const long reason)
    return "OTHER";
 }
 
-void ExportClosedPositionIfNeeded(void)
+void ExportClosedPositionIfNeeded(const ulong exitDealHint = 0)
 {
    if(!g_trackingTrade)
       return;
@@ -607,15 +632,29 @@ void ExportClosedPositionIfNeeded(void)
       return;
 
    const datetime now = TimeTradeServer();
+   ulong exitDeal = 0;
+   if(exitDealHint > 0 && HistoryDealSelect(exitDealHint) &&
+      HistoryDealGetInteger(exitDealHint, DEAL_MAGIC) == InpMagicNumber &&
+      HistoryDealGetString(exitDealHint, DEAL_SYMBOL) == _Symbol &&
+      (ulong)HistoryDealGetInteger(exitDealHint, DEAL_POSITION_ID) == g_activePositionId)
+   {
+      const ENUM_DEAL_ENTRY hintedEntry =
+         (ENUM_DEAL_ENTRY)HistoryDealGetInteger(exitDealHint, DEAL_ENTRY);
+      if(hintedEntry == DEAL_ENTRY_OUT || hintedEntry == DEAL_ENTRY_OUT_BY)
+         exitDeal = exitDealHint;
+   }
+
+   // HistoryDealSelect narrows the selected history to one deal. Restore the
+   // complete position window before calculating P/L or searching a fallback.
    if(!HistorySelect(g_activeEntryTime - 60, now + 60))
       return;
 
-   ulong exitDeal = 0;
    for(int i = HistoryDealsTotal() - 1; i >= 0; i--)
    {
       const ulong deal = HistoryDealGetTicket(i);
       if(deal == 0 || HistoryDealGetInteger(deal, DEAL_MAGIC) != InpMagicNumber ||
-         HistoryDealGetString(deal, DEAL_SYMBOL) != _Symbol)
+         HistoryDealGetString(deal, DEAL_SYMBOL) != _Symbol ||
+         (ulong)HistoryDealGetInteger(deal, DEAL_POSITION_ID) != g_activePositionId)
          continue;
       const ENUM_DEAL_ENTRY entry = (ENUM_DEAL_ENTRY)HistoryDealGetInteger(deal, DEAL_ENTRY);
       if(entry == DEAL_ENTRY_OUT || entry == DEAL_ENTRY_OUT_BY)
@@ -675,6 +714,8 @@ int OnInit(void)
       InpAtrPeriod <= 0 || InpRiskPercent <= 0.0 || InpRiskPercent > 100.0 ||
       InpMaxDailyLossPercent <= 0.0 || InpMaxDailyLossPercent > 100.0 ||
       InpRewardToRisk <= 0.0 || InpStopAtrMultiple <= 0.0 ||
+      InpMinTrendSeparationAtr < 0.0 || InpMinBreakoutAtr < 0.0 ||
+      InpMinBodyAtr < 0.0 ||
       InpMaxSpreadPoints <= 0.0 || InpMagicNumber <= 0 ||
       InpMaxSlippagePoints < 0 || InpExternalTimeoutMs <= 0 ||
       InpExternalMaxAgeSeconds <= 0)
@@ -721,6 +762,11 @@ int OnInit(void)
 
 void OnDeinit(const int reason)
 {
+   // The Strategy Tester can liquidate a final position after the last market
+   // tick. Reconcile that exit while the exporter is still available.
+   if(g_exporter != NULL)
+      ExportClosedPositionIfNeeded();
+
    if(g_exporter != NULL)
    {
       g_exporter.Shutdown();
@@ -744,6 +790,25 @@ void OnDeinit(const int reason)
       IndicatorRelease(g_fastEmaHandle);
    if(g_slowEmaHandle != INVALID_HANDLE)
       IndicatorRelease(g_slowEmaHandle);
+}
+
+void OnTradeTransaction(const MqlTradeTransaction &transaction,
+                        const MqlTradeRequest &request,
+                        const MqlTradeResult &result)
+{
+   if(!g_trackingTrade || transaction.type != TRADE_TRANSACTION_DEAL_ADD ||
+      transaction.deal == 0 || !HistoryDealSelect(transaction.deal))
+      return;
+
+   if(HistoryDealGetInteger(transaction.deal, DEAL_MAGIC) != InpMagicNumber ||
+      HistoryDealGetString(transaction.deal, DEAL_SYMBOL) != _Symbol ||
+      (ulong)HistoryDealGetInteger(transaction.deal, DEAL_POSITION_ID) != g_activePositionId)
+      return;
+
+   const ENUM_DEAL_ENTRY entry =
+      (ENUM_DEAL_ENTRY)HistoryDealGetInteger(transaction.deal, DEAL_ENTRY);
+   if(entry == DEAL_ENTRY_OUT || entry == DEAL_ENTRY_OUT_BY)
+      ExportClosedPositionIfNeeded(transaction.deal);
 }
 
 void OnTick(void)

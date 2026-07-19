@@ -230,4 +230,18 @@ def validate_dataset(dataset: AnalyticsDataset) -> ValidationReport:
             "NEGATIVE_HOLDING_DURATION",
             "Holding duration cannot be negative",
         )
+
+        opened = trades["trade_event_type"].eq("OPENED")
+        closed_setup_ids = set(
+            trades.loc[trades["trade_event_type"].eq("CLOSED"), "setup_id"].dropna()
+        )
+        unclosed = opened & ~trades["setup_id"].isin(closed_setup_ids)
+        _report_rows(
+            report,
+            Table.TRADE_EVENTS,
+            unclosed,
+            "UNCLOSED_TRADE",
+            "Opened trade has no matching closed event in this dataset",
+            "warning",
+        )
     return report

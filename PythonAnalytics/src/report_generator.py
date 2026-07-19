@@ -17,11 +17,16 @@ def generate_markdown_report(
     output_path: str | Path,
     *,
     initial_equity: float = 10_000.0,
+    confidence_level: float = 0.95,
 ) -> Path:
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     validation = validate_dataset(dataset)
-    summary = calculate_performance(dataset.trades, initial_equity=initial_equity)
+    summary = calculate_performance(
+        dataset.trades,
+        initial_equity=initial_equity,
+        confidence_level=confidence_level,
+    )
     lines = [
         "# MT5 Analytics Report",
         "",

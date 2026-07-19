@@ -72,6 +72,11 @@ PythonAnalytics/
 
 The example defaults to `EXPORT_ONLY`. With the included null external provider, `EXTERNAL_FILTER` safely follows the validated MQL5 decision and logs `NO_RESPONSE`; it never waits in `OnTick`.
 
+The entry rule also requires minimum EMA separation, breakout displacement, and
+confirmation-candle body size, each normalized by ATR. These quality filters are
+configurable and reduce weak setups; they do not guarantee a higher win rate and
+must be compared on unseen chronological test periods.
+
 Before connecting a real provider, set a non-empty `InpExpectedModelVersion`. Available responses are rejected as invalid when no expected version is configured. `InpExternalTimeoutMs` is passed to the provider at initialization as its maximum asynchronous I/O budget; it is never implemented as a sleep in `OnTick`.
 
 ## Safety invariants
@@ -79,6 +84,7 @@ Before connecting a real provider, set a non-empty `InpExpectedModelVersion`. Av
 - Position size is calculated in MQL5 from equity, stop distance, tick size, tick value, and a configured risk percentage.
 - Volume is rounded down. The EA rejects the order if the broker minimum volume would exceed the risk budget.
 - Stop loss, take profit, broker stop distance, spread, free margin, allowed chart symbol, daily loss state, and existing positions are validated in MQL5. When realized plus floating strategy P/L reaches the daily limit, the EA enters its stopped state and attempts to close its own open position on every subsequent server-time update until closed.
+- Trade closes are captured from MT5 transaction events, with tick-time and shutdown reconciliation fallbacks so a tester-generated final liquidation is exported after the last market tick.
 - Only one position is allowed for the chart symbol. The example does not pyramid, use martingale, add to a loser, or place a trade after its daily stop is active.
 - External `APPROVE` cannot convert a rejected MQL5 signal into an accepted one and cannot increase risk.
 - `REDUCE_RISK` accepts only a multiplier strictly above zero and below one.
@@ -227,3 +233,7 @@ Do not give the adapter direct access to order placement or the risk manager. It
 8. Enable an external filter only after those tests, while retaining every MQL5 safety invariant.
 
 Python, AI, and machine learning do not automatically improve profitability. Any filter must be compared out of sample after spread, slippage, commissions, and execution delay.
+
+Performance reports include a configurable Wilson confidence interval around the
+observed win rate. A wider interval means the dataset is too small to support a
+precise accuracy claim; more independent closed trades narrow it.

@@ -3,6 +3,7 @@ analytics:
   export_directory: data
   reports_directory: reports
   initial_equity: 10000.0
+  confidence_level: 0.95
   rolling_feature_window: 100
 
 validation:
